@@ -1,32 +1,15 @@
 # Attendance Notification System
 
-نظام Streamlit لإعداد ومراجعة إشعارات الغياب باستخدام تقارير Excel.
+## Email safety
+The application NEVER sends email automatically.
+It only creates/opens a Gmail compose draft with the recipient, subject and body.
+You review and press Send yourself.
 
-## المزايا
-- رفع تقرير حضور شهري كامل.
-- رفع الإجازات والاستئذان ونسيان البصمة.
-- دليل موظفين متغير وقابل للتعديل.
-- ملاحظات داخل النظام.
-- تصنيف الموظفين: إرسال كامل، غياب فقط، مستثنى، نصف دوام، احتياجات خاصة، متدرب/طالب.
-- استبعاد الإجازات والاستئذانات المعتمدة.
-- استبعاد السبت لمن لا يعمل السبت.
-- تمييز أول يوم عمل.
-- قوالب بريد عربية وإنجليزية قابلة للتعديل.
-- إنشاء رابط Gmail Compose للمراجعة قبل الإرسال.
-- سجل للإشعارات.
-- نسخة احتياطية من قاعدة البيانات.
+## Editable messages
+- Edit the default Arabic/English templates from Rules & Settings.
+- Before opening Gmail, edit the individual employee's subject/body.
+- The edited text is what is placed into the Gmail draft.
 
-## تشغيل محلي
-```bash
-pip install -r requirements.txt
-streamlit run app/streamlit_app.py
-```
-
-## النشر على Streamlit Community Cloud
-1. ارفعي محتويات هذا المشروع إلى GitHub.
-2. في Streamlit Community Cloud اختاري المستودع والفرع.
-3. اختاري `app/streamlit_app.py` كملف التشغيل.
-4. Deploy.
-
-## ملاحظة مهمة عن التخزين
-نسخة SQLite المرفقة مناسبة كبداية وللاستخدام المحلي، لكن تخزين الملفات على Streamlit Cloud ليس قاعدة بيانات دائمة. استخدمي زر النسخ الاحتياطي، أو اربطي المشروع لاحقًا بـ Google Sheets أو Supabase إذا أردتِ أن تبقى الموظفون والملاحظات حتى بعد إعادة تشغيل التطبيق.
+## Deployment
+Upload the project files to GitHub and deploy the Streamlit app from Streamlit Community Cloud.
+Do not commit the SQLite database or confidential Excel files.

@@ -53,7 +53,20 @@ def init_db():
         project TEXT PRIMARY KEY, priority TEXT DEFAULT 'normal',
         notes TEXT DEFAULT '', updated_at TEXT
     );
-    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+    
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+
+# Lightweight SQLite migration so existing deployments keep working after new fields are added.
+def ensure_employee_columns():
+    c = db()
+    cols = {row["name"] for row in c.execute("PRAGMA table_info(employees)").fetchall()}
+    if "project" not in cols:
+        c.execute("ALTER TABLE employees ADD COLUMN project TEXT DEFAULT ''")
+    if "project_priority" not in cols:
+        c.execute("ALTER TABLE employees ADD COLUMN project_priority TEXT DEFAULT 'normal'")
+    c.commit()
+    c.close()
+
     CREATE TABLE IF NOT EXISTS history (
         id INTEGER PRIMARY KEY AUTOINCREMENT, emp_no TEXT, email TEXT,
         subject TEXT, body TEXT, status TEXT, created_at TEXT
@@ -90,6 +103,7 @@ HR Department"""
     c.commit(); c.close()
 
 init_db()
+ensure_employee_columns()
 
 def get_setting(k, default=""):
     c=db(); row=c.execute("SELECT value FROM settings WHERE key=?", (k,)).fetchone(); c.close()
@@ -324,7 +338,11 @@ def analyze(att_file,leave_file,permission_file,fingerprint_file):
         save_employees(minimal); emps=get_employees()
 
     att["case_type"]=att.apply(classify_event,axis=1)
-    att=att.merge(emps[["emp_no","name","email","category","works_saturday","hire_date","active","project","project_priority"]],
+    # Ensure optional project fields exist even for legacy employee tables.
+for _col, _default in [("project",""), ("project_priority","normal")]:
+    if _col not in emps.columns:
+        emps[_col] = _default
+att=att.merge(emps[["emp_no","name","email","category","works_saturday","hire_date","active","project","project_priority"]],
                   on="emp_no",how="left",suffixes=("","_master"))
     att["name"]=att["name_master"].where(att["name_master"].notna() & att["name_master"].ne(""),att["name"])
     att["project"]=att["project"].fillna("")
