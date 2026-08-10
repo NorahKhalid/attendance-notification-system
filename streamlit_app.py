@@ -339,15 +339,20 @@ def analyze(att_file,leave_file,permission_file,fingerprint_file):
 
     att["case_type"]=att.apply(classify_event,axis=1)
     # Ensure optional project fields exist even for legacy employee tables.
-for _col, _default in [("project",""), ("project_priority","normal")]:
-    if _col not in emps.columns:
-        emps[_col] = _default
-att=att.merge(emps[["emp_no","name","email","category","works_saturday","hire_date","active","project","project_priority"]],
-                  on="emp_no",how="left",suffixes=("","_master"))
-    att["name"]=att["name_master"].where(att["name_master"].notna() & att["name_master"].ne(""),att["name"])
-    att["project"]=att["project"].fillna("")
-    att["project_priority"]=att["project_priority"].fillna("normal")
-    att=att[att["active"].fillna(1).astype(bool)].copy()
+    for _col, _default in [("project", ""), ("project_priority", "normal")]:
+        if _col not in emps.columns:
+            emps[_col] = _default
+
+    att = att.merge(
+        emps[["emp_no","name","email","category","works_saturday","hire_date","active","project","project_priority"]],
+        on="emp_no", how="left", suffixes=("","_master")
+    )
+    att["name"] = att["name_master"].where(
+        att["name_master"].notna() & att["name_master"].ne(""), att["name"]
+    )
+    att["project"] = att["project"].fillna("")
+    att["project_priority"] = att["project_priority"].fillna("normal")
+    att = att[att["active"].fillna(1).astype(bool)].copy()
 
     reasons=[]; excluded=[]; first_flags=[]; required=[]; actual=[]; early_valid=[]
     def is_approved(s):
