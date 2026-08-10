@@ -193,7 +193,10 @@ def normalize_employees(uploaded):
     email=col(df,["Email","Work Email","Company Email"])
     hire=col(df,["Hiring Date","Hire Date"])
     out=pd.DataFrame()
-    out["emp_no"]=df[no].map(lambda x: "" if pd.isna(x) else str(x).replace(".0", "").strip()) if no else ""
+    emp_series = df[no]
+    if isinstance(emp_series, pd.DataFrame):
+        emp_series = emp_series.iloc[:, 0]
+    out["emp_no"] = emp_series.map(lambda x: "" if pd.isna(x) else re.sub(r"\\.0$", "", str(x).strip())) if no else ""
     out["name"]=df[name].astype(str).replace("nan","").str.strip() if name else ""
     out["email"]=df[email].astype(str).replace("nan","").str.strip() if email else ""
     out["hire_date"]=df[hire].map(parse_date).dt.strftime("%Y-%m-%d") if hire else ""
@@ -224,7 +227,10 @@ def normalize_attendance(uploaded):
     typ=col(df,["Transaction Type","Type"])
     value=col(df,["Transaction Value","Value"])
     out=pd.DataFrame()
-    out["emp_no"]=df[no].map(lambda x: "" if pd.isna(x) else str(x).replace(".0", "").strip())
+    emp_series = df[no]
+    if isinstance(emp_series, pd.DataFrame):
+        emp_series = emp_series.iloc[:, 0]
+    out["emp_no"] = emp_series.map(lambda x: "" if pd.isna(x) else re.sub(r"\\.0$", "", str(x).strip()))
     out["name"]=df[name].astype(str).replace("nan","").str.strip() if name else ""
     out["date"]=df[d].map(parse_date) if d else pd.NaT
     out["event"]=df[typ].astype(str).str.strip() if typ else ""
@@ -239,7 +245,10 @@ def normalize_leave(uploaded):
     typ=col(df,["Transaction Type","Type"])
     status=col(df,["Status"])
     out=pd.DataFrame()
-    out["emp_no"]=df[no].map(lambda x: "" if pd.isna(x) else str(x).replace(".0", "").strip())
+    emp_series = df[no]
+    if isinstance(emp_series, pd.DataFrame):
+        emp_series = emp_series.iloc[:, 0]
+    out["emp_no"] = emp_series.map(lambda x: "" if pd.isna(x) else re.sub(r"\\.0$", "", str(x).strip()))
     out["from"]=df[frm].map(parse_date)
     out["to"]=df[to].map(parse_date)
     out["type"]=df[typ].astype(str).str.strip() if typ else ""
@@ -255,7 +264,10 @@ def normalize_fingerprint(uploaded):
     d=col(df,["Attendance Date","Date"])
     status=col(df,["Status"])
     out=pd.DataFrame()
-    out["emp_no"]=df[no].map(lambda x: "" if pd.isna(x) else str(x).replace(".0", "").strip())
+    emp_series = df[no]
+    if isinstance(emp_series, pd.DataFrame):
+        emp_series = emp_series.iloc[:, 0]
+    out["emp_no"] = emp_series.map(lambda x: "" if pd.isna(x) else re.sub(r"\\.0$", "", str(x).strip()))
     out["date"]=df[d].map(parse_date)
     out["status"]=df[status].astype(str).str.strip() if status else ""
     return out[out.emp_no.ne("") & out.date.notna()].copy()
