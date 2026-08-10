@@ -206,22 +206,40 @@ def normalize_attendance(uploaded):
         "Emp. Name","Emp. No.","Attendance Date","Transaction Type",
         "Employee Name","Employee Number","Employment Number",
         "رقم الموظف","رقم الموظف.","اسم الموظف","تاريخ الحضور",
-        "تاريخ","نوع الحركة","نوع العملية","التاريخ"
+        "تاريخ","نوع الحركة","نوع العملية","التاريخ",
+        "Entry Time","Exit Time","Check In","Check Out",
+        "وقت الدخول","وقت الخروج"
     ])
-    no = col_index(df, ["Emp. No.","Employment Number","Employee Number","Emp No","Employment No",
-                        "رقم الموظف","الرقم الوظيفي"])
+    no = col_index(df, ["Emp. No.","Employment Number","Employee Number","Emp No",
+                        "Employment No","رقم الموظف","الرقم الوظيفي"])
     name = col_index(df, ["Emp. Name","Employee Name","Employee name","اسم الموظف"])
     d = col_index(df, ["Attendance Date","Date","تاريخ الحضور","التاريخ"])
     typ = col_index(df, ["Transaction Type","Type","نوع الحركة","نوع العملية","الحالة"])
     value = col_index(df, ["Transaction Value","Value","قيمة الحركة","القيمة"])
-
+    status = col_index(df, ["Status","الحالة","حالة الطلب"])
     out = pd.DataFrame(index=df.index)
     out["emp_no"] = series_at(df,no).map(normalize_emp_no_value)
     out["name"] = series_at(df,name).astype(str).replace({"nan":"","None":""}).str.strip()
     out["date"] = series_at(df,d).map(parse_date)
     out["event"] = series_at(df,typ).astype(str).replace({"nan":"","None":""}).str.strip()
     out["value"] = series_at(df,value).astype(str).replace({"nan":"","None":""}).str.strip()
+    out["status"] = series_at(df,status).astype(str).replace({"nan":"","None":""}).str.strip()
     return out[out.emp_no.ne("") & out.date.notna()].copy()
+
+def classify_event(row):
+    s = " ".join([str(row.get("event","")), str(row.get("value","")),
+                  str(row.get("status",""))]).lower()
+    if any(x in s for x in ["absence","absent","غياب","غائب"]): return "غياب"
+    if any(x in s for x in ["early leave","early exit","early departure","خروج مبكر","مغادرة مبكرة"]): return "خروج مبكر"
+    if any(x in s for x in ["late","tardy","delay","تأخير","متأخر"]): return "تأخير صباحي"
+    if any(x in s for x in ["departure","leaving","مغادرة"]): return "مغادرة"
+    if any(x in s for x in ["missing fingerprint","missed fingerprint","fingerprint missing",
+                             "forgot fingerprint","نسيان البصمة","نسي البصمة","بصمة مفقودة"]):
+        if any(x in s for x in ["out","exit","خروج"]): return "نسيان بصمة خروج"
+        if any(x in s for x in ["in","entry","دخول"]): return "نسيان بصمة دخول"
+        return "نسيان بصمة"
+    if any(x in s for x in ["overtime","over time","إضافي","اوفر تايم"]): return "عمل إضافي"
+    return str(row.get("event","")).strip() or "حالة حضور"
 
 def normalize_leave(uploaded):
     df = read_report(uploaded, ["Emp. No.","Transaction Type","From Date","To Date","Status"])
@@ -269,68 +287,90 @@ def analyze(att_file, leave_file, permission_file, fingerprint_file):
     perms=normalize_permission(permission_file) if permission_file else pd.DataFrame()
     fps=normalize_fingerprint(fingerprint_file) if fingerprint_file else pd.DataFrame()
     emps=get_employees()
-    # The attendance report itself contains employee number/name, so do not
-    # block the monthly workflow just because the separate email master was
-    # not uploaded. New employees are added with a blank email; the user can
-    # upload/update the email file later from the Employees page.
-    if emps.empty:
-        discovered = employees_from_attendance(att)
-        if not discovered.empty:
-            save_employees(discovered)
-            emps = get_employees()
-    if emps.empty:
-        return pd.DataFrame(), {"error":"لم أجد أرقام موظفين في تقرير الحضور."}
 
-    absn=att[att.event.str.lower().eq("absence")].copy()
-    absn=absn.merge(emps[["emp_no","name","email","category","works_saturday","hire_date","active"]],
-                    on="emp_no",how="left",suffixes=("","_master"))
-    absn["name"]=absn["name_master"].where(absn["name_master"].notna() &
-        absn["name_master"].ne(""),absn["name"])
-    absn=absn[absn["active"].fillna(1).astype(bool)].copy()
+    # Build a basic employee master automatically from the attendance report if needed.
+    if emps.empty:
+        minimal=att[["emp_no","name"]].drop_duplicates("emp_no").copy()
+        minimal["email"]=""; minimal["hire_date"]=""; minimal["category"]="full"
+        minimal["works_saturday"]=1; minimal["active"]=1
+        save_employees(minimal); emps=get_employees()
+
+    att["case_type"]=att.apply(classify_event,axis=1)
+    att=att.merge(emps[["emp_no","name","email","category","works_saturday","hire_date","active"]],
+                  on="emp_no",how="left",suffixes=("","_master"))
+    att["name"]=att["name_master"].where(att["name_master"].notna() & att["name_master"].ne(""),att["name"])
+    att=att[att["active"].fillna(1).astype(bool)].copy()
 
     approved_words=["approved","موافق","approved non deduct","approved non-deduct"]
     def is_approved(s):
         s=str(s).lower()
         return any(w in s for w in approved_words)
 
-    reasons=[]; excluded=[]
-    for _,r in absn.iterrows():
+    reasons=[]; excluded=[]; first_flags=[]
+    for _,r in att.iterrows():
         emp=str(r.emp_no); d=r.date.normalize()
         cat=str(r.category) if pd.notna(r.category) else "full"
         reason=[]
         if cat=="exclude": reason.append("موظف مستثنى")
-        if d.day_name()=="Saturday" and int(r.works_saturday or 0)==0:
-            reason.append("لا يعمل السبت")
+        if d.day_name()=="Saturday" and int(r.works_saturday or 0)==0: reason.append("لا يعمل السبت")
         if not leaves.empty:
             x=leaves[(leaves.emp_no==emp)&leaves["from"].notna()&leaves["to"].notna()&
-                (leaves["from"].dt.normalize()<=d)&(leaves["to"].dt.normalize()>=d)&
-                leaves.status.map(is_approved)]
+                     (leaves["from"].dt.normalize()<=d)&(leaves["to"].dt.normalize()>=d)&
+                     leaves.status.map(is_approved)]
             if not x.empty: reason.append("إجازة معتمدة")
         if not perms.empty:
             x=perms[(perms.emp_no==emp)&perms["from"].notna()&perms["to"].notna()&
-                (perms["from"].dt.normalize()<=d)&(perms["to"].dt.normalize()>=d)&
-                perms.status.map(is_approved)]
+                     (perms["from"].dt.normalize()<=d)&(perms["to"].dt.normalize()>=d)&
+                     perms.status.map(is_approved)]
             if not x.empty: reason.append("استئذان معتمد")
         if not fps.empty:
             x=fps[(fps.emp_no==emp)&(fps.date.dt.normalize()==d)]
-            if not x.empty: reason.append("طلب نسيان بصمة")
-        first_day=False
+            if not x.empty:
+                ft=" ".join(x.status.astype(str).tolist()).lower()
+                if any(z in ft for z in ["out","exit","خروج"]): reason.append("نسيان بصمة خروج")
+                elif any(z in ft for z in ["in","entry","دخول"]): reason.append("نسيان بصمة دخول")
+                else: reason.append("نسيان بصمة")
+        first=False
         if pd.notna(r.hire_date) and str(r.hire_date).strip() not in ("","nan","NaT"):
             try:
-                first_day=pd.Timestamp(r.hire_date).normalize()==d
-                if first_day: reason.append("أول يوم عمل")
+                first=pd.Timestamp(r.hire_date).normalize()==d
+                if first: reason.append("أول يوم عمل")
             except Exception: pass
-        reasons.append("; ".join(reason))
-        # Any exception means do not send automatically.
-        excluded.append(bool(reason))
-    absn["reason"]=reasons
-    absn["excluded"]=excluded
-    absn["first_day"]=absn["reason"].str.contains("أول يوم عمل",na=False)
-    absn["note"]=absn.emp_no.map(note_for)
-    absn["category_label"]=absn.category.map(category_label).fillna("إرسال كامل")
-    return absn.reset_index(drop=True), {
-        "attendance_rows":len(att),"absence_rows":len(absn),
-        "excluded":int(absn.excluded.sum())
+        reasons.append("; ".join(reason)); excluded.append(bool(reason)); first_flags.append(first)
+
+    att["reason"]=reasons; att["excluded"]=excluded; att["first_day"]=first_flags
+    att["note"]=att.emp_no.map(note_for)
+    att["category_label"]=att.category.map(category_label).fillna("إرسال كامل")
+
+    # Add fingerprint dates that are not represented as attendance rows.
+    if not fps.empty:
+        existing=set(zip(att.emp_no.astype(str),att.date.dt.normalize()))
+        extra=[]
+        for _,r in fps.iterrows():
+            key=(str(r.emp_no),r.date.normalize())
+            if key in existing: continue
+            emp=emps[emps.emp_no.astype(str)==str(r.emp_no)]
+            if emp.empty: continue
+            rr=emp.iloc[0]; ft=str(r.status).lower()
+            typ="نسيان بصمة خروج" if any(z in ft for z in ["out","exit","خروج"]) else (
+                "نسيان بصمة دخول" if any(z in ft for z in ["in","entry","دخول"]) else "نسيان بصمة")
+            extra.append({"emp_no":str(r.emp_no),"name":rr["name"],"email":rr["email"],"date":r.date,
+                          "event":"","value":"","status":r.status,"case_type":typ,"category":rr["category"],
+                          "works_saturday":rr["works_saturday"],"hire_date":rr["hire_date"],"active":rr["active"],
+                          "reason":"نسيان البصمة","excluded":True,"first_day":False,
+                          "note":note_for(str(r.emp_no)),"category_label":category_label(rr["category"])})
+        if extra: att=pd.concat([att,pd.DataFrame(extra)],ignore_index=True)
+
+    return att.reset_index(drop=True), {
+        "attendance_rows":len(att),
+        "total_cases":len(att),
+        "unique_employees":int(att.emp_no.nunique()),
+        "absence_rows":int((att.case_type=="غياب").sum()),
+        "late_rows":int((att.case_type=="تأخير صباحي").sum()),
+        "early_leave_rows":int((att.case_type=="خروج مبكر").sum()),
+        "departure_rows":int((att.case_type=="مغادرة").sum()),
+        "fingerprint_rows":int(att.case_type.str.contains("نسيان بصمة",na=False).sum()),
+        "excluded":int(att.excluded.sum())
     }
 
 def make_gmail_url(to,subject,body):
@@ -377,8 +417,22 @@ elif page==T["reports"]:
             st.success("تم التحليل.")
             st.json(meta)
             if not res.empty:
-                st.dataframe(res[["emp_no","name","email","date","event","category_label",
-                                   "reason","note","excluded","first_day"]],use_container_width=True)
+                st.subheader("ملخص الحالات")
+                m1,m2,m3,m4,m5,m6=st.columns(6)
+                m1.metric("غياب",meta.get("absence_rows",0))
+                m2.metric("تأخير صباحي",meta.get("late_rows",0))
+                m3.metric("خروج مبكر",meta.get("early_leave_rows",0))
+                m4.metric("مغادرة",meta.get("departure_rows",0))
+                m5.metric("نسيان بصمة",meta.get("fingerprint_rows",0))
+                m6.metric("مستبعد",meta.get("excluded",0))
+                show=res[["emp_no","name","email","date","case_type","category_label",
+                          "reason","note","excluded","first_day"]].copy()
+                show.columns=["الرقم الوظيفي","اسم الموظف","الإيميل","التاريخ","نوع الحالة",
+                              "نوع الإرسال","السبب","ملاحظة","مستبعد","أول يوم"]
+                st.dataframe(show,use_container_width=True)
+                st.download_button("⬇️ تحميل نتيجة التحليل CSV",
+                                   show.to_csv(index=False).encode("utf-8-sig"),
+                                   file_name="attendance_analysis.csv",mime="text/csv")
         except Exception as ex:
             st.error("تعذر تحليل التقرير. تأكدي أن الملفات هي تقارير ZenHR نفسها.")
             st.exception(ex)
