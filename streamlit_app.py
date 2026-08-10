@@ -166,6 +166,22 @@ def normalize_employees(uploaded):
                         if hire is not None else "")
     return out[out.emp_no.ne("")].drop_duplicates("emp_no")
 
+def employees_from_attendance(att):
+    """Build a basic employee directory from the attendance report itself.
+    Email/category/settings are preserved from the existing directory.
+    This means the monthly attendance file can be uploaded without first
+    uploading a separate employee master file.
+    """
+    if att is None or att.empty:
+        return pd.DataFrame(columns=["emp_no","name","email","hire_date"])
+    out = att[["emp_no","name"]].copy()
+    out["emp_no"] = out["emp_no"].map(normalize_emp_no_value)
+    out["name"] = out["name"].astype(str).replace({"nan":"","None":""}).str.strip()
+    out = out[out.emp_no.ne("")].drop_duplicates("emp_no")
+    out["email"] = ""
+    out["hire_date"] = ""
+    return out[["emp_no","name","email","hire_date"]]
+
 def save_employees(df):
     c=db(); now=datetime.now().isoformat(timespec="seconds")
     for _,r in df.iterrows():
@@ -253,8 +269,17 @@ def analyze(att_file, leave_file, permission_file, fingerprint_file):
     perms=normalize_permission(permission_file) if permission_file else pd.DataFrame()
     fps=normalize_fingerprint(fingerprint_file) if fingerprint_file else pd.DataFrame()
     emps=get_employees()
+    # The attendance report itself contains employee number/name, so do not
+    # block the monthly workflow just because the separate email master was
+    # not uploaded. New employees are added with a blank email; the user can
+    # upload/update the email file later from the Employees page.
     if emps.empty:
-        return pd.DataFrame(), {"error":"لا يوجد موظفون. ارفعي ملف الموظفين أولاً."}
+        discovered = employees_from_attendance(att)
+        if not discovered.empty:
+            save_employees(discovered)
+            emps = get_employees()
+    if emps.empty:
+        return pd.DataFrame(), {"error":"لم أجد أرقام موظفين في تقرير الحضور."}
 
     absn=att[att.event.str.lower().eq("absence")].copy()
     absn=absn.merge(emps[["emp_no","name","email","category","works_saturday","hire_date","active"]],
@@ -330,8 +355,8 @@ if page==T["dashboard"]:
 
 elif page==T["reports"]:
     st.title("📂 "+T["reports"])
-    st.caption("مصمم لتقارير ZenHR التي تحتوي على صف عنوان/تاريخ فوق صف الأعمدة. كل ملف يمكن تغييره شهريًا.")
-    emp_file=st.file_uploader("1) ملف الموظفين والإيميلات",type=["xlsx"],key="emp")
+    st.caption("تقدرين ترفعين تقرير الحضور الشهري مباشرة. النظام يستخرج منه أرقام وأسماء الموظفين تلقائيًا، وملف الإيميلات يبقى اختياريًا لتحديث/إضافة الإيميلات لاحقًا.")
+    emp_file=st.file_uploader("1) ملف الموظفين والإيميلات (اختياري — للتحديث والإيميلات)",type=["xlsx"],key="emp")
     if emp_file and st.button("تحديث دليل الموظفين"):
         try:
             e=normalize_employees(emp_file); save_employees(e)
