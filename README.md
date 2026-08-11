@@ -1,15 +1,4 @@
-# Attendance Notification System
+# Attendance Notification System V11
+Upload to GitHub and deploy `streamlit_app.py` on Streamlit Cloud.
 
-## Email safety
-The application NEVER sends email automatically.
-It only creates/opens a Gmail compose draft with the recipient, subject and body.
-You review and press Send yourself.
-
-## Editable messages
-- Edit the default Arabic/English templates from Rules & Settings.
-- Before opening Gmail, edit the individual employee's subject/body.
-- The edited text is what is placed into the Gmail draft.
-
-## Deployment
-Upload the project files to GitHub and deploy the Streamlit app from Streamlit Community Cloud.
-Do not commit the SQLite database or confidential Excel files.
+Features: dashboard, persistent analysis during navigation, employee/email/project master, project priority, notes, Saturday rules, Friday/Saturday flags, first-day flag, case filters, editable Arabic/English email templates, and Gmail draft-only review. No automatic sending.
